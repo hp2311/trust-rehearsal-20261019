@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  # Dry run: builds the wheel, sdist and SBOM and uploads them as workflow artifacts.
+  # It never creates a release and never attests. It runs only when the release
+  # process changes, so a change to it is exercised before a tag.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/make_sbom.py"
+      - "requirements/sbom.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # Only a pushed tag publishes. Every other trigger is a dry run.
+      PUBLISH: ${{ github.ref_type == 'tag' }}
+    # The publish job: creates the GitHub release. id-token and attestations are
+    # for signing and attesting the artefacts; no other job holds them.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Tag must match __version__
+        if: ${{ env.PUBLISH == 'true' }}
+        run: |
+          v="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/rehearsal_pkg/__init__.py)"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != __version__ $v"; exit 1; }
+
+      - name: Install build tool
+        run: python -m pip install --require-hashes -r requirements/build.txt build==1.2.2 || python -m pip install build
+
+      - name: Build wheel and sdist
+        run: |
+          python -m build --no-isolation
+
+      - name: CycloneDX SBOM of the wheel
+        run: |
+          python -m pip install --require-hashes -r requirements/sbom.txt
+          python packaging/make_sbom.py dist
+          ls -l dist
+
+      # Provenance and SBOM attestations are signed with Sigstore using the GitHub
+      # OIDC token (keyless). They run only for a tag in a PUBLIC repository: on a
+      # private repository on the Free or Team plan GitHub does not offer artifact
+      # attestations, and the step would fail the release. Once the repository is
+      # public the same workflow attests with no change. Nothing is claimed about a
+      # release that was not attested: the notice below says so in the run log.
+      - name: Attest build provenance (wheel, sdist, SBOM)
+        if: ${{ env.PUBLISH == 'true' && !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.cdx.json
+
+      - name: Attest SBOM (bound to the wheel)
+        if: ${{ env.PUBLISH == 'true' && !github.event.repository.private }}
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/*.whl
+          sbom-path: dist/*.cdx.json
+
+      - name: Attestation skipped (notice)
+        if: ${{ env.PUBLISH != 'true' || github.event.repository.private }}
+        run: |
+          echo "::notice title=No attestation::Build provenance and SBOM attestations were NOT created. Reason: publish=${PUBLISH}, repository private=${{ github.event.repository.private }}. Attestations are made only for a tag in a public repository, so this build has none."
+
+      - name: Publish release
+        if: ${{ env.PUBLISH == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Keep dry-run output
+        if: ${{ env.PUBLISH != 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dry-run
+          path: dist/
+          if-no-files-found: error

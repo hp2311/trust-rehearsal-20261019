@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trust-rehearsal"
+description = "THROWAWAY: rehearsal of the Tokenorama launch-day trust steps (S_T:6). Not a product."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [{ name = "Tokenorama launch rehearsal" }]
+dynamic = ["version"]
+dependencies = ["tzdata; platform_system == 'Windows'"]
+
+[tool.hatch.version]
+path = "src/rehearsal_pkg/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rehearsal_pkg"]

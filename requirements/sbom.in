@@ -1,0 +1,5 @@
+# Tool the release build installs to write the wheel's SBOM (packaging/make_sbom.py).
+# Compiled to sbom.txt with hashes, same as ci.txt:
+#   uv pip compile --universal --python-version 3.9 --generate-hashes \
+#       requirements/sbom.in -o requirements/sbom.txt
+cyclonedx-bom

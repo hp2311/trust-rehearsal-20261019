@@ -1,0 +1,71 @@
+name: Scorecard
+
+# Runs the OpenSSF Scorecard checks against this repository and publishes the result to
+# the public Scorecard API (api.scorecard.dev), which is what `tools/trust-check.sh` reads.
+# The result is a measure of development practices, not a statement that the code has no
+# vulnerabilities. See docs/VERIFY.md.
+#
+# Scorecard's publishing rules (ossf/scorecard-action, "Workflow restrictions") shape this
+# file: no write permission at the top level, no `run` steps in the job, only the actions
+# below, and no top-level `env`. Do not add any of those here.
+#
+# Scorecard on a private repository needs GitHub Advanced Security, which this plan does
+# not have, so the job is skipped while the repository is private. It runs from the first
+# trigger after the repository is public: a push to main, the weekly schedule, or
+# Actions -> Scorecard -> Run workflow.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Tuesday 06:41 UTC, so the published result is never more than a week old.
+    - cron: "41 6 * * 2"
+  # Re-scores when branch protection changes.
+  branch_protection_rule:
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    # Skipped while private (see above); runs once the repository is public.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Upload the results to code scanning.
+      security-events: write
+      # Publish the result to the Scorecard API (GitHub OIDC; no secret involved).
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Keep the results
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 30
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: results.sarif
+          category: scorecard
