@@ -74,6 +74,12 @@ def main() -> int:
     root["version"] = version
     root["purl"] = f"pkg:pypi/{re.sub(r'[-_.]+', '-', dist_name).lower()}@{version}"
     bom.setdefault("components", [])
+    # --output-reproducible drops serialNumber, but actions/attest-sbom refuses a
+    # CycloneDX file without one ("Unsupported SBOM format", rehearsal 2026-10-19).
+    # Derive it from the wheel's content so the SBOM stays reproducible.
+    import hashlib, uuid
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    bom["serialNumber"] = "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"{root['purl']}#{digest}"))
 
     out = dist / f"{dist_name}-{version}.cdx.json"
     out.write_text(json.dumps(bom, indent=2, sort_keys=True) + "\n")
