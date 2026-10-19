@@ -69,12 +69,23 @@ jobs:
             dist/*.tar.gz
             dist/*.cdx.json
 
+      # sbom-path takes ONE file, not a glob (rehearsal 2026-10-19: `dist/*.cdx.json` fails
+      # with "SBOM file not found"), so resolve the single SBOM file name first.
+      - name: Find the SBOM file
+        id: sbom
+        if: ${{ env.PUBLISH == 'true' && !github.event.repository.private }}
+        run: |
+          set -eu
+          n="$(ls dist/*.cdx.json | wc -l)"
+          [ "$n" = 1 ] || { echo "expected one SBOM in dist/, found $n"; exit 1; }
+          echo "path=$(ls dist/*.cdx.json)" >> "$GITHUB_OUTPUT"
+
       - name: Attest SBOM (bound to the wheel)
         if: ${{ env.PUBLISH == 'true' && !github.event.repository.private }}
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: dist/*.whl
-          sbom-path: dist/*.cdx.json
+          sbom-path: ${{ steps.sbom.outputs.path }}
 
       - name: Attestation skipped (notice)
         if: ${{ env.PUBLISH != 'true' || github.event.repository.private }}
